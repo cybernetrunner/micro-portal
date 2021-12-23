@@ -1,0 +1,54 @@
+{
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "swagger": "2.0",
+  "info": {
+    "title": "micro/portal/pkg/pb/service.proto",
+    "version": "version not set"
+  },
+  "paths": {
+    "/version": {
+      "get": {
+        "tags": [
+          "Portal"
+        ],
+        "operationId": "PortalPortal_GetVersion",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/portalVersionResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "portalVersionResponse": {
+      "description": "TODO: Structure your own protobuf messages. Each protocol buffer message is a \nsmall logical record of information, containing a series of name-value pairs.",
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "string"
+        }
+      }
+    },
+    "rpcStatus": {}
+  },
+  "tags": [
+    {
+      "name": "Portal"
+    }
+  ]
+}
