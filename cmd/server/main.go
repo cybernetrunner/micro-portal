@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"strings"
 
-	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
+	grpcPrometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sirupsen/logrus"
@@ -25,10 +25,32 @@ import (
 	"github.com/infobloxopen/atlas-app-toolkit/gorm/resource"
 )
 
+var (
+	logLevel = viper.GetString("logging.level")
+
+	// internal configuration variables
+	internalEnabled   = viper.GetBool("internal.enable")
+	internalAddress   = viper.GetString("internal.address")
+	internalPort      = viper.GetString("internal.port")
+	internalServeHost = fmt.Sprintf("%s:%s", internalAddress, internalPort)
+
+	// gateway configuration variables
+	gatewayEndpoint    = viper.GetString("gateway.endpoint")
+	gatewaySwaggerFile = viper.GetString("gateway.swaggerFile")
+	gatewayAddress     = viper.GetString("gateway.address")
+	gatewayPort        = viper.GetString("gateway.port")
+	gatewayServeHost   = fmt.Sprintf("%s:%s", gatewayAddress, gatewayPort)
+
+	// server configuration variables
+	serverAddress   = viper.GetString("server.address")
+	serverPort      = viper.GetString("server.port")
+	serverServeHost = fmt.Sprintf("%s:%s", serverAddress, serverPort)
+)
+
 func main() {
 	doneC := make(chan error)
 	logger := NewLogger()
-	if viper.GetBool("internal.enable") {
+	if internalEnabled {
 		go func() { doneC <- ServeInternal(logger) }()
 	}
 
@@ -45,8 +67,8 @@ func NewLogger() *logrus.Logger {
 	logger.SetReportCaller(true)
 
 	// Set the log level on the default logger based on command line flag
-	if level, err := logrus.ParseLevel(viper.GetString("logging.level")); err != nil {
-		logger.Errorf("Invalid %q provided for log level", viper.GetString("logging.level"))
+	if level, err := logrus.ParseLevel(logLevel); err != nil {
+		logger.Errorf("Invalid %q provided for log level", logLevel)
 		logger.SetLevel(logrus.InfoLevel)
 	} else {
 		logger.SetLevel(level)
@@ -65,12 +87,12 @@ func ServeInternal(logger *logrus.Logger) error {
 	if err != nil {
 		return err
 	}
-	l, err := net.Listen("tcp", fmt.Sprintf("%s:%s", viper.GetString("internal.address"), viper.GetString("internal.port")))
+	l, err := net.Listen("tcp", internalServeHost)
 	if err != nil {
 		return err
 	}
 
-	logger.Debugf("serving internal http at %q", fmt.Sprintf("%s:%s", viper.GetString("internal.address"), viper.GetString("internal.port")))
+	logger.Debugf("serving internal http at %q", internalServeHost)
 	return s.Serve(nil, l)
 }
 
@@ -81,7 +103,7 @@ func ServeExternal(logger *logrus.Logger) error {
 	if err != nil {
 		logger.Fatalln(err)
 	}
-	grpc_prometheus.Register(grpcServer)
+	grpcPrometheus.Register(grpcServer)
 
 	s, err := server.NewServer(
 		server.WithGrpcServer(grpcServer),
@@ -96,39 +118,47 @@ func ServeExternal(logger *logrus.Logger) error {
 				runtime.WithForwardResponseOption(forwardResponseOption),
 				runtime.WithIncomingHeaderMatcher(gateway.AtlasDefaultHeaderMatcher()),
 			),
-			gateway.WithServerAddress(fmt.Sprintf("%s:%s", viper.GetString("server.address"), viper.GetString("server.port"))),
-			gateway.WithEndpointRegistration(viper.GetString("gateway.endpoint"), pb.RegisterPortalHandlerFromEndpoint),
+			gateway.WithServerAddress(internalServeHost),
+			gateway.WithEndpointRegistration(gatewayEndpoint, pb.RegisterPortalHandlerFromEndpoint),
 		),
-		server.WithHandler("/swagger/", NewSwaggerHandler(viper.GetString("gateway.swaggerFile"))),
+		server.WithHandler("/swagger/", NewSwaggerHandler(gatewaySwaggerFile)),
 	)
 	if err != nil {
 		logger.Fatalln(err)
 	}
 
-	grpcL, err := net.Listen("tcp", fmt.Sprintf("%s:%s", viper.GetString("server.address"), viper.GetString("server.port")))
+	grpcL, err := net.Listen("tcp", serverServeHost)
 	if err != nil {
 		logger.Fatalln(err)
 	}
 
-	httpL, err := net.Listen("tcp", fmt.Sprintf("%s:%s", viper.GetString("gateway.address"), viper.GetString("gateway.port")))
+	httpL, err := net.Listen("tcp", gatewayServeHost)
 	if err != nil {
 		logger.Fatalln(err)
 	}
 
-	logger.Printf("serving gRPC at %s:%s", viper.GetString("server.address"), viper.GetString("server.port"))
-	logger.Printf("serving http at %s:%s", viper.GetString("gateway.address"), viper.GetString("gateway.port"))
+	logger.Printf("serving gRPC at %s:%s", serverAddress, serverPort)
+	logger.Printf("serving http at %s:%s", gatewayAddress, gatewayPort)
 
 	return s.Serve(grpcL, httpL)
 }
 
 func init() {
 	pflag.Parse()
-	viper.BindPFlags(pflag.CommandLine)
+
+	if err := viper.BindPFlags(pflag.CommandLine); err != nil {
+		log.Fatalf("cannot load configuration: %v", err)
+	}
+
 	viper.AutomaticEnv()
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	viper.AddConfigPath(viper.GetString("config.source"))
+
 	if viper.GetString("config.file") != "" {
-		log.Printf("Serving from configuration file: %s", viper.GetString("config.file"))
+		log.Printf(
+			"Serving from configuration file: %s",
+			viper.GetString("config.file"),
+		)
 		viper.SetConfigName(viper.GetString("config.file"))
 		if err := viper.ReadInConfig(); err != nil {
 			log.Fatalf("cannot load configuration: %v", err)
